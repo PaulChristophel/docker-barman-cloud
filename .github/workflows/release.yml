@@ -7,6 +7,7 @@ on:
     paths:
       - "*.dockerfile"
       - "images.json"
+      - "scripts/e2e-test.sh"
       - ".github/workflows/release.yml"
   schedule:
     - cron: "37 6 * * 1"
@@ -111,6 +112,40 @@ jobs:
             edu.gatech.image.repository=${{ env.IMAGE_NAME }}
             edu.gatech.image.os.distribution=${{ matrix.variant.distribution }}
             edu.gatech.image.os.version=${{ matrix.variant.distribution_version }}
+
+      # Build into the local daemon and test before anything is pushed. The
+      # push step below reuses this builder's layer cache instead of rebuilding.
+      - name: Build image for end-to-end test
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ${{ matrix.variant.dockerfile }}
+          platforms: linux/amd64
+          load: true
+          push: false
+          provenance: false
+          sbom: false
+          tags: localhost/plugin-barman-cloud-sidecar:e2e
+          build-args: |
+            BASE=${{ matrix.variant.base }}
+            PYTHON_IMAGE=${{ matrix.python.image }}
+            PYTHON_VERSION=${{ matrix.python.version }}
+            PLUGIN_VERSION=${{ matrix.plugin.version }}
+            PLUGIN_COMMIT=${{ matrix.plugin.commit }}
+            PLUGIN_SOURCE_SHA256=${{ matrix.plugin.sha256 }}
+            GO_PACKAGE=${{ matrix.plugin.go_package }}
+            IMAGE_REPOSITORY=${{ env.IMAGE_NAME }}
+            IMAGE_REVISION=${{ github.sha }}
+            IMAGE_CREATED=${{ steps.build-time.outputs.created }}
+            IMAGE_DISTRIBUTION=${{ matrix.variant.distribution }}
+            IMAGE_DISTRIBUTION_VERSION=${{ matrix.variant.distribution_version }}
+          cache-from: type=gha,scope=sidecar-${{ matrix.plugin.version }}-python${{ matrix.python.series }}-${{ matrix.variant.tag }}
+
+      - name: End-to-end test against RustFS
+        timeout-minutes: 20
+        env:
+          CONTAINER_CLI: docker
+        run: ./scripts/e2e-test.sh localhost/plugin-barman-cloud-sidecar:e2e
 
       - name: Build and push image
         id: push
