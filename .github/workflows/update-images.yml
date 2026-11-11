@@ -1,0 +1,68 @@
+name: Update base-image pins
+
+on:
+  schedule:
+    - cron: "3 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: update-barman-cloud-image-configuration
+  cancel-in-progress: false
+
+jobs:
+  update-image-pins:
+    name: Refresh base-image pins
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Test base-image updater
+        run: python3 -m unittest discover -s scripts -p 'test_update_image_pins.py'
+
+      - name: Refresh runtime and builder base-image digests
+        run: python3 scripts/update_image_pins.py
+
+      - name: Create configuration update pull request
+        id: create-pr
+        uses: peter-evans/create-pull-request@v8
+        with:
+          add-paths: images.json
+          branch: automation/update-image-pins
+          commit-message: "chore: refresh base-image pins"
+          title: "chore: refresh base-image pins"
+          body: |
+            Updates configured runtime and builder base-image digest pins in
+            images.json. Plugin versions, source commits, and checksums remain
+            unchanged. Tumbleweed records the UTC date when its base pin changes.
+          delete-branch: true
+
+      - name: Approve and enable automatic merge
+        if: steps.create-pr.outputs.pull-request-number != ''
+        env:
+          GH_TOKEN: ${{ secrets.PR_APPROVER_TOKEN }}
+          PR_NUMBER: ${{ steps.create-pr.outputs.pull-request-number }}
+        run: |
+          gh pr review "$PR_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --approve
+          head_sha=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+            --json headRefOid --jq .headRefOid)
+          merge_error=$(mktemp)
+          trap 'rm -f "$merge_error"' EXIT
+          if gh pr merge "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+            --auto --squash --delete-branch --match-head-commit "$head_sha" \
+            2>"$merge_error"; then
+            exit 0
+          fi
+          cat "$merge_error" >&2
+          if grep -Fq 'Protected branch rules not configured for this branch' "$merge_error"; then
+            gh pr merge "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+              --squash --delete-branch --match-head-commit "$head_sha"
+          else
+            exit 1
+          fi

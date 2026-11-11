@@ -1,0 +1,149 @@
+name: Build and publish barman-cloud sidecar images
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - "*.dockerfile"
+      - "images.json"
+      - ".github/workflows/release.yml"
+  schedule:
+    - cron: "37 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  attestations: write
+  contents: read
+  id-token: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prepare:
+    name: Load build matrix
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.matrix.outputs.image }}
+      plugin: ${{ steps.matrix.outputs.plugin }}
+      python: ${{ steps.matrix.outputs.python }}
+      variants: ${{ steps.matrix.outputs.variants }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Read image configuration
+        id: matrix
+        run: |
+          echo "image=$(jq -r '.image' images.json)" >> "$GITHUB_OUTPUT"
+          echo "plugin=$(jq -c '.plugin' images.json)" >> "$GITHUB_OUTPUT"
+          echo "python=$(jq -c '.python' images.json)" >> "$GITHUB_OUTPUT"
+          echo "variants=$(jq -c '.distributions as $distributions | [.variants[] | . + {distribution: $distributions[.os].name, distribution_version: $distributions[.os].version, base: $distributions[.os].base}]' images.json)" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Sidecar ${{ matrix.plugin.version }} python${{ matrix.python.series }} ${{ matrix.variant.tag }}
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      IMAGE_NAME: ${{ needs.prepare.outputs.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        plugin: ${{ fromJSON(needs.prepare.outputs.plugin) }}
+        python: ${{ fromJSON(needs.prepare.outputs.python) }}
+        variant: ${{ fromJSON(needs.prepare.outputs.variants) }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          registry: docker.io
+          username: pcm0
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Record build timestamp
+        id: build-time
+        run: echo "created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      - name: Generate image metadata
+        id: metadata
+        uses: docker/metadata-action@v6
+        env:
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ matrix.plugin.version }}-python${{ matrix.python.series }}-${{ matrix.variant.tag }}
+            type=raw,value=${{ matrix.plugin.series }}-python${{ matrix.python.series }}-${{ matrix.variant.tag }}
+            type=raw,value=${{ matrix.plugin.version }}-${{ matrix.variant.tag }},enable=${{ matrix.python.default == true }}
+            type=raw,value=${{ matrix.plugin.series }}-${{ matrix.variant.tag }},enable=${{ matrix.python.default == true }}
+            type=raw,value=${{ matrix.plugin.version }},enable=${{ matrix.python.default == true && matrix.variant.latest && matrix.plugin.channel == 'stable' }}
+            type=raw,value=${{ matrix.plugin.series }},enable=${{ matrix.python.default == true && matrix.variant.latest && matrix.plugin.channel == 'stable' }}
+            type=raw,value=latest,enable=${{ matrix.python.default == true && matrix.variant.latest && matrix.plugin.channel == 'stable' }}
+            type=sha,prefix=${{ matrix.plugin.version }}-python${{ matrix.python.series }}-${{ matrix.variant.tag }}-sha-
+          annotations: |
+            org.opencontainers.image.title=CloudNativePG barman-cloud plugin sidecar ${{ matrix.plugin.version }} (python${{ matrix.python.series }}, ${{ matrix.variant.tag }})
+            org.opencontainers.image.description=barman-cloud plugin sidecar ${{ matrix.plugin.version }} built from upstream source with Python ${{ matrix.python.version }} on the ${{ matrix.variant.tag }} variant.
+            org.opencontainers.image.authors=Paul Christophel <pmartin@gatech.edu>
+            org.opencontainers.image.vendor=Paul Christophel
+            org.opencontainers.image.source=https://github.com/PaulChristophel/docker-barman-cloud
+            org.opencontainers.image.url=https://hub.docker.com/r/pcm0/plugin-barman-cloud-sidecar
+            org.opencontainers.image.documentation=https://github.com/PaulChristophel/docker-barman-cloud#readme
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.created=${{ steps.build-time.outputs.created }}
+            org.opencontainers.image.licenses=AGPL-3.0-or-later
+            org.opencontainers.image.version=${{ matrix.plugin.version }}
+            org.opencontainers.image.ref.name=${{ env.IMAGE_NAME }}:${{ matrix.plugin.version }}-python${{ matrix.python.series }}-${{ matrix.variant.tag }}
+            org.opencontainers.image.component.plugin-barman-cloud.version=${{ matrix.plugin.version }}
+            org.opencontainers.image.component.plugin-barman-cloud.revision=${{ matrix.plugin.commit }}
+            org.opencontainers.image.component.python.version=${{ matrix.python.version }}
+            org.opencontainers.image.component.python.image=${{ matrix.python.image }}
+            org.opencontainers.image.base.name=${{ matrix.variant.base }}
+            edu.gatech.image.owner=Paul Christophel <pmartin@gatech.edu>
+            edu.gatech.image.repository=${{ env.IMAGE_NAME }}
+            edu.gatech.image.os.distribution=${{ matrix.variant.distribution }}
+            edu.gatech.image.os.version=${{ matrix.variant.distribution_version }}
+
+      - name: Build and push image
+        id: push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ${{ matrix.variant.dockerfile }}
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          sbom: true
+          tags: ${{ steps.metadata.outputs.tags }}
+          labels: ${{ steps.metadata.outputs.labels }}
+          annotations: ${{ steps.metadata.outputs.annotations }}
+          build-args: |
+            BASE=${{ matrix.variant.base }}
+            PYTHON_IMAGE=${{ matrix.python.image }}
+            PYTHON_VERSION=${{ matrix.python.version }}
+            PLUGIN_VERSION=${{ matrix.plugin.version }}
+            PLUGIN_COMMIT=${{ matrix.plugin.commit }}
+            PLUGIN_SOURCE_SHA256=${{ matrix.plugin.sha256 }}
+            GO_PACKAGE=${{ matrix.plugin.go_package }}
+            IMAGE_REPOSITORY=${{ env.IMAGE_NAME }}
+            IMAGE_REVISION=${{ github.sha }}
+            IMAGE_CREATED=${{ steps.build-time.outputs.created }}
+            IMAGE_DISTRIBUTION=${{ matrix.variant.distribution }}
+            IMAGE_DISTRIBUTION_VERSION=${{ matrix.variant.distribution_version }}
+          cache-from: type=gha,scope=sidecar-${{ matrix.plugin.version }}-python${{ matrix.python.series }}-${{ matrix.variant.tag }}
+          cache-to: type=gha,mode=max,scope=sidecar-${{ matrix.plugin.version }}-python${{ matrix.python.series }}-${{ matrix.variant.tag }}
+
+      - name: Generate provenance attestation
+        uses: actions/attest@v4
+        with:
+          subject-name: index.docker.io/pcm0/plugin-barman-cloud-sidecar
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
