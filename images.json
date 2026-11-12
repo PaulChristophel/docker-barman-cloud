@@ -22,6 +22,12 @@
       "series": "3.14",
       "image": "docker.io/pcm0/python:3.14.10-tumbleweed@sha256:21e5b68632da15b7369f6fa1cbe3be78602b14a8b13689651f1e0a8f16804015",
       "default": false
+    },
+    {
+      "version": "3.13.18",
+      "series": "3.13",
+      "image": "docker.io/pcm0/python:3.13.18-tumbleweed@sha256:c8cd8cfa743c2b8c40b0ad00abb099e2463bd63d4223f2923af9df50ad2430d8",
+      "default": false
     }
   ],
   "distributions": {
