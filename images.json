@@ -14,27 +14,27 @@
     {
       "version": "3.15.2",
       "series": "3.15",
-      "image": "docker.io/pcm0/python:3.15.2-tumbleweed@sha256:9bd30360afad52d03ad9bda03b8c411d613b13bb794d63a87c1cdd976b324869",
+      "image": "docker.io/pcm0/python:3.15.2-tumbleweed@sha256:f9d69b0d7c6619722e7d856cdaa9d8d0812aa6ddb4007ecf5bd2d1a39fb0e1e2",
       "default": true
     },
     {
       "version": "3.14.10",
       "series": "3.14",
-      "image": "docker.io/pcm0/python:3.14.10-tumbleweed@sha256:21e5b68632da15b7369f6fa1cbe3be78602b14a8b13689651f1e0a8f16804015",
+      "image": "docker.io/pcm0/python:3.14.10-tumbleweed@sha256:504fa4e4b2fd346f9096b10bc7bd4d897c0a7168fe173d8ac299845e3ad2bc94",
       "default": false
     },
     {
       "version": "3.13.18",
       "series": "3.13",
-      "image": "docker.io/pcm0/python:3.13.18-tumbleweed@sha256:c8cd8cfa743c2b8c40b0ad00abb099e2463bd63d4223f2923af9df50ad2430d8",
+      "image": "docker.io/pcm0/python:3.13.18-tumbleweed@sha256:df01724f0f47a3a6588814f2782a16b7abe865b99d4bab225997477b6f0ba068",
       "default": false
     }
   ],
   "distributions": {
     "tumbleweed": {
       "name": "tumbleweed",
-      "version": "20261107",
-      "base": "docker.io/opensuse/tumbleweed:latest@sha256:a408f50f376d8591cfe376b82fcb9ab1af2e905a8b9cab9b27e5003b7a6c9dee"
+      "version": "20261120",
+      "base": "docker.io/opensuse/tumbleweed:latest@sha256:7b71ca5748f45705e8eb46e3f5c31ecb6de09af78af1969c54ab984b6d2fd9aa"
     }
   },
   "variants": [
